@@ -61,36 +61,9 @@ func New(apiKey string, opts ...Option) *Client {
 
 // Verify checks a single email address and returns the verification result.
 func (c *Client) Verify(ctx context.Context, email string) (*Result, error) {
-	body, err := json.Marshal(map[string]string{"email": email})
-	if err != nil {
-		return nil, fmt.Errorf("tickstem/verify: marshal request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/verify", bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("tickstem/verify: build request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("tickstem/verify: do request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("tickstem/verify: read response: %w", err)
-	}
-
-	if resp.StatusCode >= 400 {
-		return nil, parseAPIError(resp.StatusCode, respBody)
-	}
-
 	var result Result
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("tickstem/verify: decode response: %w", err)
+	if err := c.do(ctx, http.MethodPost, "/verify", map[string]string{"email": email}, &result); err != nil {
+		return nil, err
 	}
 	return &result, nil
 }
@@ -103,38 +76,69 @@ type ListHistoryParams struct {
 
 // ListHistory returns past verification results for the authenticated account.
 func (c *Client) ListHistory(ctx context.Context, params ListHistoryParams) (*HistoryPage, error) {
-	url := fmt.Sprintf("%s/verify/history?limit=%d&offset=%d",
-		c.baseURL,
+	path := fmt.Sprintf("/verify/history?limit=%d&offset=%d",
 		limitOrDefault(params.Limit),
 		params.Offset,
 	)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("tickstem/verify: build request: %w", err)
+	var page HistoryPage
+	if err := c.do(ctx, http.MethodGet, path, nil, &page); err != nil {
+		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	return &page, nil
+}
+
+func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+	req, err := c.buildRequest(ctx, method, path, body)
+	if err != nil {
+		return err
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("tickstem/verify: do request: %w", err)
+		return fmt.Errorf("tickstem/verify: request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("tickstem/verify: read response: %w", err)
+		return fmt.Errorf("tickstem/verify: read response: %w", err)
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, parseAPIError(resp.StatusCode, respBody)
+		return parseAPIError(resp.StatusCode, respBody)
 	}
 
-	var page HistoryPage
-	if err := json.Unmarshal(respBody, &page); err != nil {
-		return nil, fmt.Errorf("tickstem/verify: decode response: %w", err)
+	if out != nil && len(respBody) > 0 {
+		if err := json.Unmarshal(respBody, out); err != nil {
+			return fmt.Errorf("tickstem/verify: decode response: %w", err)
+		}
 	}
-	return &page, nil
+	return nil
+}
+
+func (c *Client) buildRequest(ctx context.Context, method, path string, body any) (*http.Request, error) {
+	var bodyReader io.Reader
+	if body != nil {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("tickstem/verify: encode request body: %w", err)
+		}
+		bodyReader = bytes.NewReader(encoded)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bodyReader)
+	if err != nil {
+		return nil, fmt.Errorf("tickstem/verify: build request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("User-Agent", "tickstem-go/"+Version)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Accept", "application/json")
+
+	return req, nil
 }
 
 func limitOrDefault(limit int) int {
