@@ -81,12 +81,12 @@ if result.RoleBased {
 
 ### What gets checked
 
-| Check | What it catches |
-|-------|----------------|
-| Syntax | Malformed addresses (`user@@example`, missing TLD) |
-| MX lookup | Domains with no mail server (`gmial.com`, abandoned domains) |
-| Disposable | Throwaway services (Mailinator, Guerrilla Mail, 200+ others) |
-| Role-based | Generic inboxes (`admin@`, `info@`, `noreply@`, `support@`, ...) |
+| Check | What it catches | Why it matters |
+|-------|----------------|----------------|
+| Syntax | Malformed addresses (`user@@example`, missing TLD) | Reject obviously bad input before any network call |
+| MX lookup | Domains with no mail server (`gmial.com`, abandoned domains) | Catch typos and dead domains that pass syntax checks |
+| Disposable | Throwaway services (Mailinator, Guerrilla Mail, 200+ others) | Block single-use signups that inflate user counts and churn immediately |
+| Role-based | Generic inboxes (`admin@`, `info@`, `noreply@`, `support@`, ...) | Flag addresses shared by teams or bots — poor engagement, not tied to a real person |
 
 No SMTP probing — the recipient mail server is never contacted.
 
